@@ -48,6 +48,11 @@ pub struct DocumentDBSetupConfiguration {
 
     // Runtime configuration
     pub async_runtime_worker_threads: Option<usize>,
+
+    // Unix domain socket configuration
+	pub unix_socket_enabled: Option<bool>,
+	pub unix_socket_path: Option<String>,
+		
 }
 
 impl DocumentDBSetupConfiguration {
@@ -138,6 +143,15 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
         })
     }
 
+    fn unix_socket_enabled(&self) -> bool {
+  		self.unix_socket_enabled.unwrap_or(false)  // Default: disabled
+  	}
+
+    fn unix_socket_path(&self) -> String {
+  		self.unix_socket_path
+  		    .clone()
+  		    .unwrap_or_else(|| "/tmp/osddb.sock".to_string())
+  	}
     fn postgres_idle_connection_timeout_minutes(&self) -> u64 {
         self.postgres_idle_connection_timeout_minutes.unwrap_or(5)
     }

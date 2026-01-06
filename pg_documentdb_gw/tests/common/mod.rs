@@ -133,6 +133,16 @@ pub fn setup_configuration() -> DocumentDBSetupConfiguration {
     }
 }
 
+pub fn setup_configuration_with_unix_socket_custom(
+    enabled: Option<bool>,
+    path: Option<String>,
+) -> DocumentDBSetupConfiguration {
+    let mut config = setup_configuration();
+    config.unix_socket_enabled = enabled;
+    config.unix_socket_path = path;
+    config
+}
+
 pub fn get_client() -> Client {
     let credential = Credential::builder()
         .username("test".to_string())
@@ -177,6 +187,40 @@ pub async fn initialize_with_logger() -> Client {
 pub async fn initialize_with_config(config: DocumentDBSetupConfiguration) -> Client {
     initialize_full(config).await;
     get_client()
+}
+
+#[allow(dead_code)]
+pub fn get_unix_socket_client_custom(path: &str) -> Client {
+    let credential = Credential::builder()
+        .username("test".to_string())
+        .password("test".to_string())
+        .mechanism(AuthMechanism::ScramSha256)
+        .build();
+
+    let client_options = ClientOptions::builder()
+        .credential(credential)
+        .hosts(vec![ServerAddress::parse(path).unwrap()])
+        .build();
+    Client::with_options(client_options).unwrap()
+}
+
+#[allow(dead_code)]
+pub async fn initialize_with_config_and_unix(
+    enabled: Option<bool>,
+    path: Option<String>,
+) -> (Client, Option<Client>) {
+    let config = setup_configuration_with_unix_socket_custom(enabled, path.clone());
+    initialize_full(config).await;
+    
+    let tcp_client = get_client();
+    let unix_client = if enabled.unwrap_or(false) {
+        let socket_path = path.unwrap_or_else(|| "/tmp/osddb.sock".to_string());
+        Some(get_unix_socket_client_custom(&socket_path))
+    } else {
+        None
+    };
+    
+    (tcp_client, unix_client)
 }
 
 #[allow(dead_code)]
