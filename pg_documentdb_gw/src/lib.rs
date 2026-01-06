@@ -31,7 +31,7 @@ use std::net::IpAddr;
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::{
     io::BufStream,
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 use tokio_openssl::SslStream;
 use tokio_util::sync::CancellationToken;
@@ -58,7 +58,122 @@ const TCP_KEEPALIVE_INTERVAL_SECS: u64 = 60;
 const STREAM_READ_BUFFER_SIZE: usize = 8 * 1024;
 const STREAM_WRITE_BUFFER_SIZE: usize = 8 * 1024;
 
-type GwStream = BufStream<SslStream<TcpStream>>;
+// Enum to support both TCP and Unix socket streams
+pub enum GatewayStream {
+    Tcp(BufStream<SslStream<TcpStream>>),
+    Unix(BufStream<UnixStream>),
+}
+
+// Implement AsyncRead trait for the enum
+impl tokio::io::AsyncRead for GatewayStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            GatewayStream::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
+            GatewayStream::Unix(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+// Implement AsyncWrite trait for the enum
+impl tokio::io::AsyncWrite for GatewayStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            GatewayStream::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
+            GatewayStream::Unix(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            GatewayStream::Tcp(stream) => Pin::new(stream).poll_flush(cx),
+            GatewayStream::Unix(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            GatewayStream::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
+            GatewayStream::Unix(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+}
+
+impl std::marker::Unpin for GatewayStream {}
+
+type GwStream = GatewayStream;
+
+/// Applies secure permissions to Unix domain socket file.
+/// 
+/// On Unix systems: Sets permissions to 0660 (owner+group read/write)
+/// On other platforms: No-op (permissions handled by OS defaults)
+#[cfg(unix)]
+fn apply_socket_permissions(path: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let permissions = std::fs::Permissions::from_mode(0o660);
+    std::fs::set_permissions(path, permissions)
+}
+
+#[cfg(not(unix))]
+fn apply_socket_permissions(_path: &str) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// Creates and configures a Unix domain socket listener.
+///
+/// This function handles the complete Unix socket setup:
+/// 1. Removes stale socket file from previous run (crash recovery)
+/// 2. Binds to the socket path
+/// 3. Sets appropriate permissions via platform-specific logic
+///
+/// # Arguments
+///
+/// * `socket_path` - Path where the Unix socket should be created
+///
+/// # Returns
+///
+/// Returns the configured `UnixListener` or an error if setup fails.
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * Failed to bind to the socket path
+/// * Failed to set socket file permissions
+fn create_unix_socket_listener(socket_path: &str) -> Result<UnixListener> {
+    // Attempt to remove stale socket file from previous run (e.g., after crash).
+    // This is standard Unix socket practice - PostgreSQL, MySQL, Redis all use this pattern.
+    // Socket files cannot be cleaned up during crash (SIGKILL, segfault, power loss, etc.),
+    // so cleanup at startup is the only reliable approach for crash recovery.
+    // If the file couldn't be removed, bind() will fail with clear error "Address already in use".
+    if let Err(e) = std::fs::remove_file(socket_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                "Could not remove existing socket file {}: {}.",
+                socket_path, e
+            );
+        }
+    }
+    
+    let listener = UnixListener::bind(socket_path)?;
+    
+    apply_socket_permissions(socket_path)?;
+
+    tracing::info!("Unix socket listener bound to {}", socket_path);
+    Ok(listener)
+}
 
 /// Runs the DocumentDB gateway server, accepting and handling incoming connections.
 ///
@@ -103,7 +218,19 @@ where
     ))
     .await?;
 
-    // Listen for new tcp connections until token is not cancelled
+    let unix_listener = if service_context.setup_configuration().unix_socket_enabled() {
+        let unix_socket_path = service_context.setup_configuration().unix_socket_path();
+        let unix_listener = create_unix_socket_listener(&unix_socket_path)?;
+        Some((unix_listener, unix_socket_path))
+    } else {
+        tracing::info!("Unix socket disabled (not configured)");
+        None
+    };
+
+    tracing::info!("TCP listener bound to port {}", service_context.setup_configuration().gateway_listen_port());
+
+
+    // Listen for new tcp and unix socket connections
     loop {
         tokio::select! {
             stream_and_address = tcp_listener.accept() => {
@@ -122,7 +249,31 @@ where
                     }
                 });
             }
+            stream_result = async {
+                match &unix_listener {
+                    Some((listener, _)) => listener.accept().await,
+                    None => std::future::pending().await,
+                }
+            }, if unix_listener.is_some() => {
+                let conn_service_context = service_context.clone();
+                let conn_telemetry = telemetry.clone();
+                tokio::spawn(async move {
+                    let conn_res = handle_unix_connection::<T>(
+                        stream_result,
+                        conn_service_context,
+                        conn_telemetry,
+                    )
+                    .await;
+
+                    if let Err(conn_err) = conn_res {
+                        tracing::error!("Failed to accept a Unix socket connection: {conn_err:?}.");
+                    }
+                });
+            }
             () = token.cancelled() => {
+                if let Some((_, unix_socket_path)) = unix_listener {
+                    let _ = std::fs::remove_file(unix_socket_path);
+                }
                 return Ok(())
             }
         }
@@ -222,7 +373,59 @@ where
         tls_stream,
     );
 
-    handle_stream::<T>(buffered_stream, connection_context).await;
+    let gw_stream = GatewayStream::Tcp(buffered_stream);
+
+    handle_stream::<T>(gw_stream, connection_context).await;
+    Ok(())
+}
+
+/// Handles a single Unix socket connection without TLS.
+///
+/// Unix socket connections are local-only and don't require TLS encryption.
+/// This function creates a connection context and processes the connection.
+///
+/// # Arguments
+///
+/// * `stream_result` - Result containing the Unix stream from accept()
+/// * `service_context` - Service configuration and shared state
+/// * `telemetry` - Optional telemetry provider for metrics collection
+///
+/// # Returns
+///
+/// Returns `Ok(())` on successful connection handling, or an error if connection
+/// setup fails.
+async fn handle_unix_connection<T>(
+    stream_result: std::result::Result<(UnixStream, tokio::net::unix::SocketAddr), std::io::Error>,
+    service_context: ServiceContext,
+    telemetry: Option<Box<dyn TelemetryProvider>>,
+) -> Result<()>
+where
+    T: PgDataClient,
+{
+    let (unix_stream, _socket_addr) = stream_result?;
+
+    let connection_id = Uuid::new_v4();
+    tracing::info!(activity_id = connection_id.to_string().as_str(), "New Unix socket connection established");
+
+    // For Unix sockets, use localhost as the address since they don't have IP addresses
+    let connection_context = ConnectionContext::new(
+        service_context,
+        telemetry,
+        "localhost".to_string(),
+        None, // No TLS for Unix sockets
+        connection_id,
+        "UnixSocket".to_string(),
+    );
+
+    let buffered_unix = BufStream::with_capacity(
+        STREAM_READ_BUFFER_SIZE,
+        STREAM_WRITE_BUFFER_SIZE,
+        unix_stream,
+    );
+    
+    let gw_stream = GatewayStream::Unix(buffered_unix);
+
+    handle_stream::<T>(gw_stream, connection_context).await;
     Ok(())
 }
 
