@@ -12,6 +12,7 @@ pub mod configuration;
 pub mod context;
 pub mod error;
 pub mod explain;
+pub mod gateway_stream;
 pub mod postgres;
 pub mod processor;
 pub mod protocol;
@@ -22,6 +23,7 @@ pub mod shutdown_controller;
 pub mod startup;
 pub mod telemetry;
 
+pub use crate::gateway_stream::GwStream;
 pub use crate::postgres::QueryCatalog;
 
 use either::Either::{Left, Right};
@@ -57,64 +59,6 @@ const TCP_KEEPALIVE_INTERVAL_SECS: u64 = 60;
 // Buffer configuration constants
 const STREAM_READ_BUFFER_SIZE: usize = 8 * 1024;
 const STREAM_WRITE_BUFFER_SIZE: usize = 8 * 1024;
-
-// Enum to support both TCP and Unix socket streams
-pub enum GatewayStream {
-    Tcp(BufStream<SslStream<TcpStream>>),
-    Unix(BufStream<UnixStream>),
-}
-
-// Implement AsyncRead trait for the enum
-impl tokio::io::AsyncRead for GatewayStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            GatewayStream::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
-            GatewayStream::Unix(stream) => Pin::new(stream).poll_read(cx, buf),
-        }
-    }
-}
-
-// Implement AsyncWrite trait for the enum
-impl tokio::io::AsyncWrite for GatewayStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        match self.get_mut() {
-            GatewayStream::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
-            GatewayStream::Unix(stream) => Pin::new(stream).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            GatewayStream::Tcp(stream) => Pin::new(stream).poll_flush(cx),
-            GatewayStream::Unix(stream) => Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            GatewayStream::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
-            GatewayStream::Unix(stream) => Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
-
-impl std::marker::Unpin for GatewayStream {}
-
-type GwStream = GatewayStream;
 
 /// Applies secure permissions to Unix domain socket file.
 /// 
@@ -218,16 +162,15 @@ where
     ))
     .await?;
 
-    let unix_listener = if service_context.setup_configuration().unix_socket_enabled() {
-        let unix_socket_path = service_context.setup_configuration().unix_socket_path();
-        let unix_listener = create_unix_socket_listener(&unix_socket_path)?;
-        Some((unix_listener, unix_socket_path))
+    tracing::info!("TCP listener bound to port {}", service_context.setup_configuration().gateway_listen_port());
+
+    let unix_listener = if let Some(unix_socket_path) = service_context.setup_configuration().unix_socket_path() {
+        let unix_listener = create_unix_socket_listener(unix_socket_path)?;
+        Some((unix_listener, unix_socket_path.to_string()))
     } else {
         tracing::info!("Unix socket disabled (not configured)");
         None
     };
-
-    tracing::info!("TCP listener bound to port {}", service_context.setup_configuration().gateway_listen_port());
 
 
     // Listen for new tcp and unix socket connections
@@ -237,7 +180,7 @@ where
                 let conn_service_context = service_context.clone();
                 let conn_telemetry = telemetry.clone();
                 tokio::spawn(async move {
-                    let conn_res = handle_connection::<T>(
+                    let conn_res = handle_tcp_connection::<T>(
                         stream_and_address,
                         conn_service_context,
                         conn_telemetry,
@@ -245,7 +188,7 @@ where
                     .await;
 
                     if let Err(conn_err) = conn_res {
-                        tracing::error!("Failed to accept a connection: {conn_err:?}.");
+                        tracing::error!("Failed to accept a TCP connection: {conn_err:?}.");
                     }
                 });
             }
@@ -304,7 +247,7 @@ where
 /// * SSL/TLS handshake fails
 /// * Connection context creation fails
 /// * Stream buffering setup fails
-async fn handle_connection<T>(
+async fn handle_tcp_connection<T>(
     stream_and_address: std::result::Result<(TcpStream, std::net::SocketAddr), std::io::Error>,
     service_context: ServiceContext,
     telemetry: Option<Box<dyn TelemetryProvider>>,
@@ -373,7 +316,7 @@ where
         tls_stream,
     );
 
-    let gw_stream = GatewayStream::Tcp(buffered_stream);
+    let gw_stream = GwStream::Tcp(buffered_stream);
 
     handle_stream::<T>(gw_stream, connection_context).await;
     Ok(())
@@ -423,7 +366,7 @@ where
         unix_stream,
     );
     
-    let gw_stream = GatewayStream::Unix(buffered_unix);
+    let gw_stream = GwStream::Unix(buffered_unix);
 
     handle_stream::<T>(gw_stream, connection_context).await;
     Ok(())

@@ -75,11 +75,9 @@ pub trait SetupConfiguration: DynClone + Send + Sync + Debug {
     /// Returns the number of worker threads for the async runtime.
     fn async_runtime_worker_threads(&self) -> usize;
 
-    /// Returns whether Unix domain socket is enabled
-    fn unix_socket_enabled(&self) -> bool;
-
-    /// Returns the Unix domain socket path
-    fn unix_socket_path(&self) -> String;
+    /// Returns the Unix domain socket path if Unix domain socket is enabled.
+    /// Returns None if Unix socket is disabled.
+    fn unix_socket_path(&self) -> Option<&str>;
 
     /// Returns the timeout duration (in minutes) for PostgreSQL connections
     fn postgres_idle_connection_timeout_minutes(&self) -> u64;

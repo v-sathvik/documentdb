@@ -49,17 +49,28 @@ pub struct DocumentDBSetupConfiguration {
     pub async_runtime_worker_threads: Option<usize>,
 
     // Unix domain socket configuration
-	pub unix_socket_enabled: Option<bool>,
+    // If specified with a non-empty path, Unix socket is enabled at that path.
+    // If not specified (None), Unix socket is disabled.
 	pub unix_socket_path: Option<String>,
-		
 }
 
 impl DocumentDBSetupConfiguration {
     pub fn new(config_path: &Path) -> Result<Self> {
         let config_file = File::open(config_path)?;
-        serde_json::from_reader(config_file).map_err(|e| {
+        let config: Self = serde_json::from_reader(config_file).map_err(|e| {
             DocumentDBError::internal_error(format!("Failed to parse configuration file: {e}"))
-        })
+        })?;
+        
+        // Validate Unix socket path if provided
+        if let Some(path) = &config.unix_socket_path {
+            if path.trim().is_empty() {
+                return Err(DocumentDBError::internal_error(
+                    "UnixSocketPath cannot be empty. Either provide a valid path or omit the field to disable Unix sockets.".to_string()
+                ));
+            }
+        }
+        
+        Ok(config)
     }
 }
 
@@ -142,15 +153,9 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
         })
     }
 
-    fn unix_socket_enabled(&self) -> bool {
-  		self.unix_socket_enabled.unwrap_or(false)  // Default: disabled
-  	}
-
-    fn unix_socket_path(&self) -> String {
-  		self.unix_socket_path
-  		    .clone()
-  		    .unwrap_or_else(|| "/tmp/osddb.sock".to_string())
-  	}
+    fn unix_socket_path(&self) -> Option<&str> {
+        self.unix_socket_path.as_deref()
+    }
     fn postgres_idle_connection_timeout_minutes(&self) -> u64 {
         self.postgres_idle_connection_timeout_minutes.unwrap_or(5)
     }
