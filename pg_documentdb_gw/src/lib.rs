@@ -61,19 +61,19 @@ const STREAM_WRITE_BUFFER_SIZE: usize = 8 * 1024;
 // TLS detection timeout
 const TLS_PEEK_TIMEOUT_SECS: u64 = 5;
 
-/// Applies secure permissions to Unix domain socket file.
+/// Applies configurable permissions to Unix domain socket file.
 /// 
-/// On Unix systems: Sets permissions to 0660 (owner+group read/write)
+/// On Unix systems: Sets permissions to the specified octal value
 /// On other platforms: No-op (permissions handled by OS defaults)
 #[cfg(unix)]
-fn apply_socket_permissions(path: &str) -> std::io::Result<()> {
+fn apply_socket_permissions(path: &str, permissions: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let permissions = std::fs::Permissions::from_mode(0o660);
-    std::fs::set_permissions(path, permissions)
+    let file_permissions = std::fs::Permissions::from_mode(permissions);
+    std::fs::set_permissions(path, file_permissions)
 }
 
 #[cfg(not(unix))]
-fn apply_socket_permissions(_path: &str) -> std::io::Result<()> {
+fn apply_socket_permissions(_path: &str, _permissions: u32) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -87,6 +87,7 @@ fn apply_socket_permissions(_path: &str) -> std::io::Result<()> {
 /// # Arguments
 ///
 /// * `socket_path` - Path where the Unix socket should be created
+/// * `permissions` - Octal file permissions (e.g., 0o660)
 ///
 /// # Returns
 ///
@@ -97,7 +98,7 @@ fn apply_socket_permissions(_path: &str) -> std::io::Result<()> {
 /// This function will return an error if:
 /// * Failed to bind to the socket path
 /// * Failed to set socket file permissions
-fn create_unix_socket_listener(socket_path: &str) -> Result<UnixListener> {
+fn create_unix_socket_listener(socket_path: &str, permissions: u32) -> Result<UnixListener> {
     // Attempt to remove stale socket file from previous run (e.g., after crash).
     // This is standard Unix socket practice - PostgreSQL, MySQL, Redis all use this pattern.
     // Socket files cannot be cleaned up during crash (SIGKILL, segfault, power loss, etc.),
@@ -114,9 +115,9 @@ fn create_unix_socket_listener(socket_path: &str) -> Result<UnixListener> {
     
     let listener = UnixListener::bind(socket_path)?;
     
-    apply_socket_permissions(socket_path)?;
+    apply_socket_permissions(socket_path, permissions)?;
 
-    tracing::info!("Unix socket listener bound to {}", socket_path);
+    tracing::info!("Unix socket listener bound to {} with permissions {:o}", socket_path, permissions);
     Ok(listener)
 }
 
@@ -166,7 +167,8 @@ where
     tracing::info!("TCP listener bound to port {}", service_context.setup_configuration().gateway_listen_port());
 
     let unix_listener = if let Some(unix_socket_path) = service_context.setup_configuration().unix_socket_path() {
-        let unix_listener = create_unix_socket_listener(unix_socket_path)?;
+        let permissions = service_context.setup_configuration().unix_socket_file_permissions();
+        let unix_listener = create_unix_socket_listener(unix_socket_path, permissions)?;
         Some((unix_listener, unix_socket_path.to_string()))
     } else {
         tracing::info!("Unix socket disabled (not configured)");
@@ -433,7 +435,7 @@ where
 /// Handles a single Unix socket connection without TLS.
 ///
 /// Unix socket connections are local-only and don't require TLS encryption.
-/// This function creates a connection context and processes the connection using
+/// This function creates a connection context and processes the connection.
 ///
 /// # Arguments
 ///
@@ -458,16 +460,15 @@ where
     let connection_id = Uuid::new_v4();
     tracing::info!(
         activity_id = connection_id.to_string().as_str(),
-        "Accepted new Unix socket connection"
+        "New Unix socket connection established"
     );
 
-    // Unix sockets don't need TCP-specific configuration (nodelay, keepalive, TLS detection)
-    // They are always local and unencrypted
+    // For Unix sockets, use localhost as the address since they don't have IP addresses
 
     let connection_context = ConnectionContext::new(
         service_context,
         telemetry,
-        "localhost".to_string(), // Unix sockets use localhost as the address
+        "localhost".to_string(),
         None, // No TLS for Unix sockets
         connection_id,
         "UnixSocket".to_string(),

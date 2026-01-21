@@ -85,6 +85,10 @@ pub trait SetupConfiguration: DynClone + Send + Sync + Debug {
     /// Returns whether TLS should be enforced for all connections.
     fn enforce_tls(&self) -> bool;
 
+    /// Returns the file permissions for Unix socket files (octal format).
+    /// Defaults to 0o660 (owner+group read/write) if not specified.
+    fn unix_socket_file_permissions(&self) -> u32;
+
     /// Provides a way to downcast the trait object to a concrete type.
     fn as_any(&self) -> &dyn std::any::Any;
 }

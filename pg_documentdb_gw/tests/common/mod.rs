@@ -135,9 +135,11 @@ pub fn setup_configuration() -> DocumentDBSetupConfiguration {
 
 pub fn setup_configuration_with_unix_socket_custom(
     path: Option<String>,
+    permissions: Option<String>,
 ) -> DocumentDBSetupConfiguration {
     let mut config = setup_configuration();
     config.unix_socket_path = path;
+    config.unix_socket_file_permissions = permissions;
     config
 }
 
@@ -209,7 +211,7 @@ pub fn get_unix_socket_client_custom(path: &str) -> Client {
 pub async fn initialize_with_config_and_unix(
     path: Option<String>,
 ) -> (Client, Option<Client>) {
-    let config = setup_configuration_with_unix_socket_custom(path.clone());
+    let config = setup_configuration_with_unix_socket_custom(path.clone(), None);
     initialize_full(config).await;
     
     let tcp_client = get_client();
