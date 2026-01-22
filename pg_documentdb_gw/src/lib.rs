@@ -216,9 +216,6 @@ where
                 });
             }
             () = token.cancelled() => {
-                if let Some((_, unix_socket_path)) = unix_listener {
-                    let _ = std::fs::remove_file(unix_socket_path);
-                }
                 return Ok(())
             }
         }
