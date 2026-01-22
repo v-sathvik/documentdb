@@ -169,7 +169,7 @@ where
     let unix_listener = if let Some(unix_socket_path) = service_context.setup_configuration().unix_socket_path() {
         let permissions = service_context.setup_configuration().unix_socket_file_permissions();
         let unix_listener = create_unix_socket_listener(unix_socket_path, permissions)?;
-        Some((unix_listener, unix_socket_path.to_string()))
+        Some(unix_listener)
     } else {
         tracing::info!("Unix socket disabled (not configured)");
         None
@@ -196,7 +196,7 @@ where
             }
             stream_result = async {
                 match &unix_listener {
-                    Some((listener, _)) => listener.accept().await,
+                    Some(listener) => listener.accept().await,
                     None => std::future::pending().await,
                 }
             }, if unix_listener.is_some() => {
