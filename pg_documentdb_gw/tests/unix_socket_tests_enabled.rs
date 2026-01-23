@@ -15,17 +15,14 @@ pub mod common;
 #[tokio::test]
 async fn test_unix_socket_enabled() {
     let socket_path = "/tmp/osddb.sock";
-    let (_tcp, unix) = common::initialize_with_config_and_unix(
-        Some(socket_path.to_string()),
-    )
-    .await;
+    let (_tcp, unix) = common::initialize_with_config_and_unix(Some(socket_path.to_string())).await;
 
     // Verify socket file exists
     assert!(Path::new(socket_path).exists());
-    
+
     // Verify Unix client was created
     let unix_client = unix.expect("Unix client should exist");
-    
+
     // Verify we can connect and make requests
     let db_names = unix_client.list_database_names().await;
     assert!(db_names.is_ok());
@@ -34,18 +31,15 @@ async fn test_unix_socket_enabled() {
 #[tokio::test]
 async fn test_tcp_and_unix_both_work() {
     let socket_path = "/tmp/osddb.sock";
-    let (tcp, unix) = common::initialize_with_config_and_unix(
-        Some(socket_path.to_string()),
-    )
-    .await;
+    let (tcp, unix) = common::initialize_with_config_and_unix(Some(socket_path.to_string())).await;
 
     let unix_client = unix.expect("Unix client should exist");
     let tcp_db = tcp.database("test_both");
     let unix_db = unix_client.database("test_both");
-    
+
     // Clean up database to ensure a fresh start
     tcp_db.drop().await.unwrap();
-    
+
     let tcp_coll = tcp_db.collection::<bson::Document>("test");
     let unix_coll = unix_db.collection::<bson::Document>("test");
 
@@ -67,5 +61,8 @@ async fn test_tcp_and_unix_both_work() {
     let unix_count = unix_coll.count_documents(doc! {}).await.unwrap();
     assert_eq!(tcp_count, 2, "TCP client should see 2 documents");
     assert_eq!(unix_count, 2, "Unix client should see 2 documents");
-    assert_eq!(tcp_count, unix_count, "Both clients should see the same count");
+    assert_eq!(
+        tcp_count, unix_count,
+        "Both clients should see the same count"
+    );
 }

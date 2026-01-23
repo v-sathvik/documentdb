@@ -52,8 +52,8 @@ pub struct DocumentDBSetupConfiguration {
     // Unix domain socket configuration
     // If specified with a non-empty path, Unix socket is enabled at that path.
     // If not specified (None), Unix socket is disabled.
-	pub unix_socket_path: Option<String>,
-    
+    pub unix_socket_path: Option<String>,
+
     // Unix socket file permissions (octal format string, e.g., "0660" for owner+group read/write)
     // If not specified, defaults to 0o660
     pub unix_socket_file_permissions: Option<String>,
@@ -65,7 +65,7 @@ impl DocumentDBSetupConfiguration {
         let config: Self = serde_json::from_reader(config_file).map_err(|e| {
             DocumentDBError::internal_error(format!("Failed to parse configuration file: {e}"))
         })?;
-        
+
         // Validate Unix socket path if provided
         if let Some(path) = &config.unix_socket_path {
             if path.trim().is_empty() {
@@ -74,16 +74,16 @@ impl DocumentDBSetupConfiguration {
                 ));
             }
         }
-        
+
         // Validate Unix socket permissions if provided
         if let Some(perm_str) = &config.unix_socket_file_permissions {
             if u32::from_str_radix(perm_str, 8).is_err() {
                 return Err(DocumentDBError::internal_error(
-                    format!("Invalid UnixSocketFilePermissions '{}'. Expected octal format like '0600', '0644'", perm_str)
+                    format!("Invalid UnixSocketFilePermissions '{perm_str}'. Expected octal format like '0600', '0644'")
                 ));
             }
         }
-        
+
         Ok(config)
     }
 }
@@ -170,7 +170,7 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
     fn unix_socket_path(&self) -> Option<&str> {
         self.unix_socket_path.as_deref()
     }
-    
+
     fn postgres_idle_connection_timeout_minutes(&self) -> u64 {
         self.postgres_idle_connection_timeout_minutes.unwrap_or(5)
     }
@@ -181,8 +181,8 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
 
     fn unix_socket_file_permissions(&self) -> u32 {
         match &self.unix_socket_file_permissions {
-            None => 0o660,  // Default when not provided
-            Some(perm_str) => u32::from_str_radix(perm_str, 8).unwrap()
+            None => 0o660, // Default when not provided
+            Some(perm_str) => u32::from_str_radix(perm_str, 8).unwrap(),
         }
     }
 }

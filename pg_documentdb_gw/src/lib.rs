@@ -62,7 +62,7 @@ const STREAM_WRITE_BUFFER_SIZE: usize = 8 * 1024;
 const TLS_PEEK_TIMEOUT_SECS: u64 = 5;
 
 /// Applies configurable permissions to Unix domain socket file.
-/// 
+///
 /// On Unix systems: Sets permissions to the specified octal value
 /// On other platforms: No-op (permissions handled by OS defaults)
 #[cfg(unix)]
@@ -108,16 +108,21 @@ fn create_unix_socket_listener(socket_path: &str, permissions: u32) -> Result<Un
         if e.kind() != std::io::ErrorKind::NotFound {
             tracing::warn!(
                 "Could not remove existing socket file {}: {}.",
-                socket_path, e
+                socket_path,
+                e
             );
         }
     }
-    
+
     let listener = UnixListener::bind(socket_path)?;
-    
+
     apply_socket_permissions(socket_path, permissions)?;
 
-    tracing::info!("Unix socket listener bound to {} with permissions {:o}", socket_path, permissions);
+    tracing::info!(
+        "Unix socket listener bound to {} with permissions {:o}",
+        socket_path,
+        permissions
+    );
     Ok(listener)
 }
 
@@ -164,16 +169,22 @@ where
     ))
     .await?;
 
-    tracing::info!("TCP listener bound to port {}", service_context.setup_configuration().gateway_listen_port());
+    tracing::info!(
+        "TCP listener bound to port {}",
+        service_context.setup_configuration().gateway_listen_port()
+    );
 
-    let unix_listener = if let Some(unix_socket_path) = service_context.setup_configuration().unix_socket_path() {
-        let permissions = service_context.setup_configuration().unix_socket_file_permissions();
-        let unix_listener = create_unix_socket_listener(unix_socket_path, permissions)?;
-        Some(unix_listener)
-    } else {
-        tracing::info!("Unix socket disabled (not configured)");
-        None
-    };
+    let unix_listener =
+        if let Some(unix_socket_path) = service_context.setup_configuration().unix_socket_path() {
+            let permissions = service_context
+                .setup_configuration()
+                .unix_socket_file_permissions();
+            let unix_listener = create_unix_socket_listener(unix_socket_path, permissions)?;
+            Some(unix_listener)
+        } else {
+            tracing::info!("Unix socket disabled (not configured)");
+            None
+        };
 
     // Listen for new tcp and unix socket connections
     loop {

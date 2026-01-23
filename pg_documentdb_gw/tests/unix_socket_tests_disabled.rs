@@ -37,17 +37,20 @@ async fn test_unix_socket_disabled() {
 #[tokio::test]
 async fn test_unix_socket_connection_fails_when_disabled() {
     let _ = std::fs::remove_file("/tmp/osddb.sock");
-    
+
     let (_tcp, unix) = common::initialize_with_config_and_unix(None).await;
     assert!(unix.is_none());
 
     let socket_path = "/tmp/osddb.sock";
     assert!(!Path::new(socket_path).exists());
-    
+
     // Attempt to create Unix socket client
     let unix_client = common::get_unix_socket_client_custom(socket_path);
-    
+
     // Try to perform an operation - should fail since socket doesn't exist
     let result = unix_client.list_database_names().await;
-    assert!(result.is_err(), "Unix socket connection should fail when socket is disabled");
+    assert!(
+        result.is_err(),
+        "Unix socket connection should fail when socket is disabled"
+    );
 }

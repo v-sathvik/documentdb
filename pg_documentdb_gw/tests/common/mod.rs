@@ -208,19 +208,13 @@ pub fn get_unix_socket_client_custom(path: &str) -> Client {
 }
 
 #[allow(dead_code)]
-pub async fn initialize_with_config_and_unix(
-    path: Option<String>,
-) -> (Client, Option<Client>) {
+pub async fn initialize_with_config_and_unix(path: Option<String>) -> (Client, Option<Client>) {
     let config = setup_configuration_with_unix_socket_custom(path.clone(), None);
     initialize_full(config).await;
-    
+
     let tcp_client = get_client();
-    let unix_client = if let Some(socket_path) = path {
-        Some(get_unix_socket_client_custom(&socket_path))
-    } else {
-        None
-    };
-    
+    let unix_client = path.map(|socket_path| get_unix_socket_client_custom(&socket_path));
+
     (tcp_client, unix_client)
 }
 
