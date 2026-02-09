@@ -16,7 +16,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bson::{rawbson, RawBson};
+use bson::{rawbson, RawBson, RawDocumentBuf};
 use notify::{event::ModifyKind, Error, Event, EventKind, RecursiveMode, Watcher};
 use serde::Deserialize;
 use tokio::{
@@ -28,7 +28,7 @@ use tokio::{
 use crate::{
     configuration::{dynamic::POSTGRES_RECOVERY_KEY, DynamicConfiguration, SetupConfiguration},
     error::{DocumentDBError, Result},
-    postgres::{Connection, ConnectionPool, QueryCatalog},
+    postgres::{Connection, ConnectionPool, PgDocument, QueryCatalog},
     requests::request_tracker::RequestTracker,
 };
 
@@ -114,6 +114,28 @@ impl PgConfigurationInner {
         Ok(configs)
     }
 
+    async fn load_replica_set_bson(&self, conn: &Connection) -> Result<Option<RawDocumentBuf>> {
+        let request_tracker = RequestTracker::new();
+        let replica_set_rows = conn
+            .query(
+                self.query_catalog.get_replicaset_info(),
+                &[],
+                &[],
+                None,
+                &request_tracker,
+            )
+            .await?;
+
+        if let Some(first_row) = replica_set_rows.first() {
+            let replica_set_doc: Option<PgDocument> = first_row.try_get(0)?;
+            if let Some(doc) = replica_set_doc {
+                return Ok(Some(doc.0.to_raw_document_buf()));
+            }
+        }
+
+        Ok(None)
+    }
+
     async fn load_host_config(dynamic_config_file: &str) -> Result<HostConfig> {
         let config: HostConfig = serde_json::from_str(
             &tokio::fs::read_to_string(dynamic_config_file).await?,
@@ -127,6 +149,7 @@ impl PgConfigurationInner {
 pub struct PgConfiguration {
     inner: PgConfigurationInner,
     values: RwLock<HashMap<String, String>>,
+    replica_set_bson: RwLock<Option<RawDocumentBuf>>,
     last_update_at: RwLock<Instant>,
 }
 
@@ -191,9 +214,12 @@ impl PgConfiguration {
 
         let values = RwLock::new(inner.load_configurations(&connection).await?);
 
+        let replica_set_bson = RwLock::new(inner.load_replica_set_bson(&connection).await?);
+
         let configuration = Arc::new(PgConfiguration {
             inner,
             values,
+            replica_set_bson,
             last_update_at: RwLock::new(Instant::now()),
         });
 
@@ -216,9 +242,22 @@ impl PgConfiguration {
             }
         };
 
+        let new_replica_set_bson = match self.inner.load_replica_set_bson(conn).await {
+            Ok(bson_doc) => bson_doc,
+            Err(e) => {
+                tracing::error!("Failed to reload replica set BSON: {e}");
+                return Err(e);
+            }
+        };
+
         {
             let mut config_writable = self.values.write().await;
             *config_writable = new_config;
+        }
+
+        {
+            let mut bson_writable = self.replica_set_bson.write().await;
+            *bson_writable = new_replica_set_bson;
         }
 
         {
@@ -227,6 +266,10 @@ impl PgConfiguration {
         }
 
         Ok(())
+    }
+
+    pub async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
+        self.replica_set_bson.read().await.clone()
     }
 
     pub fn start_config_watcher(

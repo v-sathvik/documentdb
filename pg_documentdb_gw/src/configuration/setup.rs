@@ -57,6 +57,13 @@ pub struct DocumentDBSetupConfiguration {
     // Unix socket file permissions (octal format string, e.g., "0660" for owner+group read/write)
     // If not specified, defaults to 0o660
     pub unix_socket_file_permissions: Option<String>,
+
+    #[serde(default = "default_is_mongo_sharded")]
+    pub is_mongo_sharded: Option<bool>,
+}
+
+fn default_is_mongo_sharded() -> Option<bool> {
+    Some(true)
 }
 
 impl DocumentDBSetupConfiguration {
@@ -177,6 +184,10 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
 
     fn enforce_tls(&self) -> bool {
         self.enforce_tls.unwrap_or(true)
+    }
+
+    fn is_mongo_sharded(&self) -> bool {
+        self.is_mongo_sharded.unwrap_or(true)
     }
 
     fn unix_socket_file_permissions(&self) -> u32 {

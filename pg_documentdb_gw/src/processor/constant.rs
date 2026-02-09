@@ -48,11 +48,23 @@ pub fn process_get_cmd_line_opts() -> Result<Response> {
 }
 
 pub fn process_is_db_grid(context: &ConnectionContext) -> Result<Response> {
-    Ok(Response::Raw(RawResponse(rawdoc! {
-        "isdbgrid":1.0,
-        "hostname":context.service_context.setup_configuration().node_host_name(),
-        "ok":OK_SUCCEEDED,
-    })))
+    let is_enabled = context
+        .service_context
+        .setup_configuration()
+        .is_mongo_sharded();
+
+    if is_enabled {
+        Ok(Response::Raw(RawResponse(rawdoc! {
+            "isdbgrid": 1.0,
+            "hostname": context.service_context.setup_configuration().node_host_name(),
+            "ok": OK_SUCCEEDED,
+        })))
+    } else {
+        Err(DocumentDBError::documentdb_error(
+            ErrorCode::CommandNotSupported,
+            "no such cmd: isdbgrid".to_string(),
+        ))
+    }
 }
 
 pub fn process_get_rw_concern(request_context: &RequestContext<'_>) -> Result<Response> {
