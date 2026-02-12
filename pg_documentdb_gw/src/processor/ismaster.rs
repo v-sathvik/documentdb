@@ -83,14 +83,9 @@ pub async fn process(
         );
     }
 
-    if let Some(pg_config) = dynamic_configuration
-        .as_any()
-        .downcast_ref::<crate::configuration::PgConfiguration>()
-    {
-        if let Some(replica_set_bson) = pg_config.get_replica_set_bson().await {
-            for (key, value) in replica_set_bson.iter().flatten() {
-                response_doc.append(key, value.to_raw_bson());
-            }
+    if let Some(replica_set_bson) = dynamic_configuration.get_replica_set_bson().await {
+        for (key, value) in replica_set_bson.iter().flatten() {
+            response_doc.append(key, value.to_raw_bson());
         }
     }
 

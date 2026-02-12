@@ -59,11 +59,11 @@ pub struct DocumentDBSetupConfiguration {
     pub unix_socket_file_permissions: Option<String>,
 
     #[serde(default = "default_is_mongo_sharded")]
-    pub is_mongo_sharded: Option<bool>,
+    pub is_mongo_sharded: bool,
 }
 
-fn default_is_mongo_sharded() -> Option<bool> {
-    Some(true)
+fn default_is_mongo_sharded() -> bool {
+    true
 }
 
 impl DocumentDBSetupConfiguration {
@@ -187,7 +187,7 @@ impl SetupConfiguration for DocumentDBSetupConfiguration {
     }
 
     fn is_mongo_sharded(&self) -> bool {
-        self.is_mongo_sharded.unwrap_or(true)
+        self.is_mongo_sharded
     }
 
     fn unix_socket_file_permissions(&self) -> u32 {

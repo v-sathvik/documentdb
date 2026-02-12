@@ -547,7 +547,7 @@ pub fn create_query_catalog() -> QueryCatalog {
             list_indexes_cursor_first_page: "SELECT cursorPage, continuation, persistConnection, cursorId FROM documentdb_api.list_indexes_cursor_first_page($1, $2)".to_string(),
 
             // hello.rs - returns single BSON document
-            replicaset_info: "SELECT documentdb_api.get_replica_set_fields()".to_string(),
+            replicaset_info: "SELECT documentdb_api_internal.get_replica_set_fields()".to_string(),
 
             // user.rs
             create_user: "SELECT documentdb_api.create_user($1)".to_string(),

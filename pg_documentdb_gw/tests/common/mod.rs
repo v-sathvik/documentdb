@@ -126,6 +126,7 @@ pub fn setup_configuration() -> DocumentDBSetupConfiguration {
         postgres_system_user: Some(
             std::env::var("PostgresSystemUser").unwrap_or(whoami::username()),
         ),
+        is_mongo_sharded: true,
         ..Default::default()
     }
 }

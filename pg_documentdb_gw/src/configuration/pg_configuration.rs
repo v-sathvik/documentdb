@@ -268,10 +268,6 @@ impl PgConfiguration {
         Ok(())
     }
 
-    pub async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
-        self.replica_set_bson.read().await.clone()
-    }
-
     pub fn start_config_watcher(
         dynamic_config_file: String,
         configuration: Arc<PgConfiguration>,
@@ -424,6 +420,10 @@ impl DynamicConfiguration for PgConfiguration {
 
     async fn allow_transaction_snapshot(&self) -> bool {
         self.get_bool("mongoAllowTransactionSnapshot", false).await
+    }
+
+    async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
+        self.replica_set_bson.read().await.clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

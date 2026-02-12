@@ -9,7 +9,7 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use bson::RawBson;
+use bson::{RawBson, RawDocumentBuf};
 
 use crate::{configuration::Version, postgres};
 
@@ -27,6 +27,12 @@ pub trait DynamicConfiguration: Send + Sync + Debug {
     async fn enable_developer_explain(&self) -> bool;
     async fn max_connections(&self) -> usize;
     async fn allow_transaction_snapshot(&self) -> bool;
+
+    /// Returns replica set BSON for hello/isMaster responses.
+    /// Returns None when no replica set info is available.
+    async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
+        None
+    }
 
     // Needed to downcast to concrete type
     fn as_any(&self) -> &dyn std::any::Any;

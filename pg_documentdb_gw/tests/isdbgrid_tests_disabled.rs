@@ -14,7 +14,7 @@ pub mod common;
 #[tokio::test]
 async fn test_isdbgrid_disabled() {
     let mut config = common::setup_configuration();
-    config.is_mongo_sharded = Some(false);
+    config.is_mongo_sharded = false;
 
     let client = common::initialize_with_config(config).await;
     let db = client.database("test_isdbgrid_disabled");
@@ -30,7 +30,7 @@ async fn test_isdbgrid_disabled() {
 #[tokio::test]
 async fn test_isdbgrid_command_fails_when_disabled() {
     let mut config = common::setup_configuration();
-    config.is_mongo_sharded = Some(false);
+    config.is_mongo_sharded = false;
 
     let client = common::initialize_with_config(config).await;
     let db = client.database("test_isdbgrid_command_disabled");
