@@ -30,8 +30,13 @@ pub trait DynamicConfiguration: Send + Sync + Debug {
 
     /// Returns replica set BSON for hello/isMaster responses.
     /// Returns None when no replica set info is available.
-    async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
-        None
+    async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf>;
+
+    /// Indicates whether to include "msg": "isdbgrid" in isMaster/hello responses
+    /// and whether the isdbgrid command returns success or error.
+    /// Default: true
+    async fn is_mongo_sharded(&self) -> bool {
+        self.get_bool("IsMongoSharded", true).await
     }
 
     // Needed to downcast to concrete type

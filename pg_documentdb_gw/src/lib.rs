@@ -642,9 +642,9 @@ where
 
     if request.request_type() == &RequestType::IsDBGrid
         && !connection_context
-            .service_context
-            .setup_configuration()
+            .dynamic_configuration()
             .is_mongo_sharded()
+            .await
     {
         return Err(DocumentDBError::documentdb_error(
             ErrorCode::CommandNotSupported,

@@ -5,7 +5,6 @@
  * fields (hosts, setName, primary, me, isWritablePrimary, secondary, etc.) when a hook
  * is configured. The gateway calls this periodically and merges the result into hello responses.
  *
- * Internal gateway use only.
  */
 CREATE OR REPLACE FUNCTION documentdb_api_internal.get_replica_set_fields()
 RETURNS __CORE_SCHEMA__.bson

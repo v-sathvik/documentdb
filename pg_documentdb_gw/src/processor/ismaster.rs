@@ -64,11 +64,7 @@ pub async fn process(
         "ok": OK_SUCCEEDED,
     };
 
-    if connection_context
-        .service_context
-        .setup_configuration()
-        .is_mongo_sharded()
-    {
+    if dynamic_configuration.is_mongo_sharded().await {
         response_doc.append("msg", "isdbgrid");
     }
 

@@ -15,6 +15,7 @@ use std::{
     },
 };
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bson::{rawbson, RawBson, RawDocumentBuf};
 use notify::{event::ModifyKind, Error, Event, EventKind, RecursiveMode, Watcher};
@@ -39,6 +40,12 @@ pub struct HostConfig {
     is_primary: String,
     #[serde(default)]
     send_shutdown_responses: String,
+    #[serde(default = "default_is_mongo_sharded")]
+    is_mongo_sharded: bool,
+}
+
+fn default_is_mongo_sharded() -> bool {
+    true
 }
 
 /// Inner struct that holds the dependencies needed for loading configurations.
@@ -64,6 +71,10 @@ impl PgConfigurationInner {
                 configs.insert(
                     "SendShutdownResponses".to_string(),
                     host_config.send_shutdown_responses.to_lowercase(),
+                );
+                configs.insert(
+                    "IsMongoSharded".to_string(),
+                    host_config.is_mongo_sharded.to_string(),
                 );
             }
             Err(e) => tracing::warn!("Host Config file not able to be loaded: {e}"),
@@ -149,7 +160,7 @@ impl PgConfigurationInner {
 pub struct PgConfiguration {
     inner: PgConfigurationInner,
     values: RwLock<HashMap<String, String>>,
-    replica_set_bson: RwLock<Option<RawDocumentBuf>>,
+    replica_set_bson: ArcSwap<Option<RawDocumentBuf>>,
     last_update_at: RwLock<Instant>,
 }
 
@@ -214,7 +225,8 @@ impl PgConfiguration {
 
         let values = RwLock::new(inner.load_configurations(&connection).await?);
 
-        let replica_set_bson = RwLock::new(inner.load_replica_set_bson(&connection).await?);
+        let replica_set_bson =
+            ArcSwap::from_pointee(inner.load_replica_set_bson(&connection).await?);
 
         let configuration = Arc::new(PgConfiguration {
             inner,
@@ -255,10 +267,7 @@ impl PgConfiguration {
             *config_writable = new_config;
         }
 
-        {
-            let mut bson_writable = self.replica_set_bson.write().await;
-            *bson_writable = new_replica_set_bson;
-        }
+        self.replica_set_bson.store(Arc::new(new_replica_set_bson));
 
         {
             let mut last_update = self.last_update_at.write().await;
@@ -423,7 +432,7 @@ impl DynamicConfiguration for PgConfiguration {
     }
 
     async fn get_replica_set_bson(&self) -> Option<RawDocumentBuf> {
-        self.replica_set_bson.read().await.clone()
+        self.replica_set_bson.load_full().as_ref().clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
