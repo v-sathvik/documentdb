@@ -932,13 +932,9 @@ impl PgDataClient for DocumentDBDataClient {
     async fn execute_rename_collection(
         &self,
         request_context: &RequestContext<'_>,
-        source_db: &str,
-        source_collection: &str,
-        target_collection: &str,
-        drop_target: bool,
         connection_context: &ConnectionContext,
     ) -> Result<Vec<Row>> {
-        let (_, request_info, request_tracker) = request_context.get_components();
+        let (request, request_info, request_tracker) = request_context.get_components();
         let rename_collection_rows = self
             .pull_connection(connection_context)
             .await?
@@ -947,13 +943,8 @@ impl PgDataClient for DocumentDBDataClient {
                     .service_context
                     .query_catalog()
                     .rename_collection(),
-                &[Type::TEXT, Type::TEXT, Type::TEXT, Type::BOOL],
-                &[
-                    &source_db,
-                    &source_collection,
-                    &target_collection,
-                    &drop_target,
-                ],
+                &[Type::BYTEA],
+                &[&PgDocument(request.document())],
                 Timeout::transaction(request_info.max_time_ms),
                 request_tracker,
             )

@@ -499,7 +499,7 @@ pub fn create_query_catalog() -> QueryCatalog {
             set_allow_write: "SET LOCAL documentdb.IsPgReadOnlyForDiskFull to false; SET transaction read write".to_string(),
             create_collection_view: "SELECT documentdb_api.create_collection_view($1, $2)".to_string(),
             shard_collection: "SELECT documentdb_api.shard_collection($1, $2, $3, $4)".to_string(),
-            rename_collection: "SELECT documentdb_api.rename_collection($1, $2, $3, $4)".to_string(),
+            rename_collection: "SELECT documentdb_api.rename_collection($1)".to_string(),
             coll_mod: "SELECT documentdb_api.coll_mod($1, $2, $3)".to_string(),
             unshard_collection: "SELECT documentdb_api.unshard_collection($1)".to_string(),
 

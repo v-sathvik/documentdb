@@ -115,7 +115,6 @@ pub async fn process_rename_collection(
     let request = request_context.payload;
     let mut source: Option<String> = None;
     let mut target: Option<String> = None;
-    let mut drop_target = false;
     request.extract_fields(|k, v| {
         match k {
             "renameCollection" => {
@@ -135,9 +134,6 @@ pub async fn process_rename_collection(
                         ))?
                         .to_string(),
                 )
-            }
-            "dropTarget" => {
-                drop_target = v.as_bool().unwrap_or(false);
             }
             _ => {}
         };
@@ -167,14 +163,7 @@ pub async fn process_rename_collection(
     }
 
     pg_data_client
-        .execute_rename_collection(
-            request_context,
-            source_db,
-            source_coll,
-            target_coll,
-            drop_target,
-            connection_context,
-        )
+        .execute_rename_collection(request_context, connection_context)
         .await?;
     Ok(Response::ok())
 }

@@ -21,15 +21,183 @@
 #include "utils/query_utils.h"
 
 #include "api_hooks.h"
+#include "commands/commands_common.h"
+#include "commands/parse_error.h"
 
+typedef struct RenameCollectionArgs
+{
+	char *databaseName;
+	char *sourceCollectionName;
+	char *targetCollectionName;
+	bool dropTarget;
+} RenameCollectionArgs;
+
+static void ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args);
+static void ExecuteRenameCollection(char *databaseName, char *sourceCollectionName,
+									char *targetCollectionName, bool dropTarget);
 static void DropMongoCollection(char *, char *);
 static void UpdateMongoCollectionName(char *, char *, char *);
 
 PG_FUNCTION_INFO_V1(command_rename_collection);
+PG_FUNCTION_INFO_V1(command_rename_collection_by_bson_spec);
+
+/*
+ * ParseRenameCollectionSpec parses BSON command specification for renameCollection.
+ * Extracts "renameCollection" (source namespace), "to" (target namespace), and "dropTarget".
+ * Splits namespaces into database and collection names.
+ */
+static void
+ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
+{
+	if (commandSpec == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
+						errmsg("renameCollection command specification cannot be NULL")));
+	}
+
+	char *sourceNamespace = NULL;
+	char *targetNamespace = NULL;
+
+	bson_iter_t specIter;
+	PgbsonInitIterator(commandSpec, &specIter);
+
+	while (bson_iter_next(&specIter))
+	{
+		pgbsonelement element;
+		BsonIterToPgbsonElement(&specIter, &element);
+
+		if (strcmp(element.path, "renameCollection") == 0)
+		{
+			EnsureTopLevelFieldType("renameCollection", &specIter, BSON_TYPE_UTF8);
+			sourceNamespace = pstrdup(element.bsonValue.value.v_utf8.str);
+		}
+		else if (strcmp(element.path, "to") == 0)
+		{
+			EnsureTopLevelFieldType("to", &specIter, BSON_TYPE_UTF8);
+			targetNamespace = pstrdup(element.bsonValue.value.v_utf8.str);
+		}
+		else if (strcmp(element.path, "dropTarget") == 0)
+		{
+			EnsureTopLevelFieldType("dropTarget", &specIter, BSON_TYPE_BOOL);
+			args->dropTarget = element.bsonValue.value.v_bool;
+		}
+		else if (!IsCommonSpecIgnoredField(element.path))
+		{
+			elog(DEBUG1, "Unrecognized command field: renameCollection.%s", element.path);
+		}
+	}
+
+	if (sourceNamespace == NULL || targetNamespace == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
+						errmsg("renameCollection command must specify both renameCollection and to fields")));
+	}
+
+	/* Split "db.collection" into separate parts */
+	char *sourceDot = strchr(sourceNamespace, '.');
+	char *targetDot = strchr(targetNamespace, '.');
+
+	if (sourceDot == NULL || targetDot == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
+						errmsg("Invalid namespace format, expected 'database.collection'")));
+	}
+
+	*sourceDot = '\0';
+	*targetDot = '\0';
+
+	args->databaseName = sourceNamespace;
+	args->sourceCollectionName = sourceDot + 1;
+	args->targetCollectionName = targetDot + 1;
+}
+
+
+/*
+ * ExecuteRenameCollection contains the core rename logic shared by both
+ * the BSON and legacy entry points.
+ */
+static void
+ExecuteRenameCollection(char *databaseName, char *sourceCollectionName,
+						char *targetCollectionName, bool dropTarget)
+{
+	Datum database_datum = CStringGetTextDatum(databaseName);
+	Datum collection_datum = CStringGetTextDatum(sourceCollectionName);
+	Datum new_collection_datum = CStringGetTextDatum(targetCollectionName);
+
+	/*
+	 * Check if the collection to be updated exists. if not, throw an error.
+	 */
+	MongoCollection *collection =
+		GetMongoCollectionByNameDatum(database_datum,
+									  collection_datum,
+									  NoLock);
+
+	if (collection == NULL)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_NAMESPACENOTFOUND),
+						errmsg("collection %s.%s does not exist",
+							   databaseName, sourceCollectionName)));
+	}
+
+	/*
+	 * Checking whether the new collection name already exists in the database.
+	 * If yes and drop_target is false, throw an error. Drop it otherwise.
+	 */
+	MongoCollection *target_collection =
+		GetMongoCollectionOrViewByNameDatum(database_datum,
+											new_collection_datum,
+											NoLock);
+
+	if (target_collection != NULL)
+	{
+		if (dropTarget)
+		{
+			DropMongoCollection(databaseName, targetCollectionName);
+		}
+		else
+		{
+			ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_NAMESPACEEXISTS),
+							errmsg("The collection %s.%s is already present in the system",
+								   databaseName, targetCollectionName)));
+		}
+	}
+
+	/*
+	 * Update the specified collection name.
+	 */
+	UpdateMongoCollectionName(databaseName, sourceCollectionName, targetCollectionName);
+}
+
+
+/*
+ * command_rename_collection_by_bson_spec handles the BSON-based signature.
+ * Signature: rename_collection(bson)
+ */
+Datum
+command_rename_collection_by_bson_spec(PG_FUNCTION_ARGS)
+{
+	if (PG_ARGISNULL(0))
+	{
+		ereport(ERROR, (errmsg("renameCollection command specification cannot be NULL")));
+	}
+
+	RenameCollectionArgs args;
+	memset(&args, 0, sizeof(RenameCollectionArgs));
+	pgbson *commandSpec = PG_GETARG_PGBSON(0);
+
+	/* Parse BSON to extract source/target namespaces and dropTarget */
+	ParseRenameCollectionSpec(commandSpec, &args);
+
+	ExecuteRenameCollection(args.databaseName, args.sourceCollectionName,
+							args.targetCollectionName, args.dropTarget);
+
+	PG_RETURN_VOID();
+}
+
 
 /*
  * command_rename_collection implements the functionality
- * of the renameCollection database command.
+ * of the renameCollection database command (legacy text signature).
  */
 Datum
 command_rename_collection(PG_FUNCTION_ARGS)
@@ -49,61 +217,13 @@ command_rename_collection(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("collection target name cannot be NULL")));
 	}
 
-	Datum database_datum = PG_GETARG_DATUM(0);
-	Datum collection_datum = PG_GETARG_DATUM(1);
-	Datum new_collection_datum = PG_GETARG_DATUM(2);
-	bool drop_target = PG_ARGISNULL(3) ? false : PG_GETARG_BOOL(3);
+	char *databaseName = TextDatumGetCString(PG_GETARG_DATUM(0));
+	char *sourceCollectionName = TextDatumGetCString(PG_GETARG_DATUM(1));
+	char *targetCollectionName = TextDatumGetCString(PG_GETARG_DATUM(2));
+	bool dropTarget = PG_ARGISNULL(3) ? false : PG_GETARG_BOOL(3);
 
-	/*
-	 * Check if the collection to be updated exists. if not, throw an error.
-	 */
-	MongoCollection *collection =
-		GetMongoCollectionByNameDatum(database_datum,
-									  collection_datum,
-									  NoLock);
-
-	if (collection == NULL)
-	{
-		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_NAMESPACENOTFOUND),
-						errmsg("collection %s.%s does not exist", TextDatumGetCString(
-								   database_datum), TextDatumGetCString(
-								   collection_datum))));
-	}
-
-	/*
-	 * Checking whether the new collection name already exists in the database. If yes and drop_target is false,
-	 * then throw an error. Drop it otherwise.
-	 */
-	MongoCollection *target_collection =
-		GetMongoCollectionOrViewByNameDatum(database_datum,
-											new_collection_datum,
-											NoLock);
-
-	if (target_collection != NULL)
-	{
-		if (drop_target)
-		{
-			DropMongoCollection(TextDatumGetCString(database_datum), TextDatumGetCString(
-									new_collection_datum));
-		}
-		else
-		{
-			ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_NAMESPACEEXISTS),
-							errmsg(
-								"The collection %s.%s is already present in the system",
-								TextDatumGetCString(database_datum),
-								TextDatumGetCString(
-									new_collection_datum))));
-		}
-	}
-
-	/*
-	 * Update the specified collection name.
-	 */
-	UpdateMongoCollectionName(
-		TextDatumGetCString(database_datum),
-		TextDatumGetCString(collection_datum),
-		TextDatumGetCString(new_collection_datum));
+	ExecuteRenameCollection(databaseName, sourceCollectionName,
+							targetCollectionName, dropTarget);
 
 	PG_RETURN_VOID();
 }

@@ -255,10 +255,6 @@ pub trait PgDataClient: Send + Sync {
     async fn execute_rename_collection(
         &self,
         request_context: &RequestContext<'_>,
-        source_db: &str,
-        source_collection: &str,
-        target_collection: &str,
-        drop_target: bool,
         connection_context: &ConnectionContext,
     ) -> Result<Vec<Row>>;
 
