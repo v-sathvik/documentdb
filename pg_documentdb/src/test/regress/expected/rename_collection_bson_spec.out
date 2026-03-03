@@ -19,9 +19,9 @@ SELECT documentdb_api.insert_one('rename_bson_db','source_coll','{"_id":"1", "a"
 
 -- Test 1: basic rename via BSON
 SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.source_coll", "to": "rename_bson_db.target_coll"}'::documentdb_core.bson);
- rename_collection 
--------------------
- 
+           rename_collection
+----------------------------------------
+ { "ok" : { "$numberDouble" : "1.0" } }
 (1 row)
 
 -- verify old name gone, new name has data
@@ -49,9 +49,9 @@ SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.ta
 ERROR:  The collection rename_bson_db.existing_coll is already present in the system
 -- Test 3: rename with dropTarget=true → succeeds
 SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.target_coll", "to": "rename_bson_db.existing_coll", "dropTarget": true}'::documentdb_core.bson);
- rename_collection 
--------------------
- 
+           rename_collection
+----------------------------------------
+ { "ok" : { "$numberDouble" : "1.0" } }
 (1 row)
 
 -- verify data moved
@@ -88,9 +88,9 @@ NOTICE:  creating collection
 (1 row)
 
 SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.extra_fields_coll", "to": "rename_bson_db.extra_fields_renamed", "lsid": {"id": "abc"}, "$db": "admin", "writeConcern": {"w": 1}}'::documentdb_core.bson);
- rename_collection 
--------------------
- 
+           rename_collection
+----------------------------------------
+ { "ok" : { "$numberDouble" : "1.0" } }
 (1 row)
 
 SELECT count(*) FROM documentdb_api.collection('rename_bson_db','extra_fields_renamed');
@@ -102,6 +102,15 @@ SELECT count(*) FROM documentdb_api.collection('rename_bson_db','extra_fields_re
 -- Test 9: invalid namespace format (no dot) → ERROR
 SELECT documentdb_api.rename_collection('{"renameCollection": "noDotHere", "to": "alsoNoDot"}'::documentdb_core.bson);
 ERROR:  Invalid namespace format, expected 'database.collection'
+-- Test 10: cross-database rename → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "otherdb.existing_coll"}'::documentdb_core.bson);
+ERROR:  renameCollection cannot change databases
+-- Test 11: rename collection to itself → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "rename_bson_db.existing_coll"}'::documentdb_core.bson);
+ERROR:  Can't rename a collection to itself
+-- Test 12: unknown field → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "rename_bson_db.new_coll", "unknownField": true}'::documentdb_core.bson);
+ERROR:  The BSON field 'renameCollection.unknownField' is not recognized as a valid field
 -- Cleanup
 SELECT documentdb_api.drop_database('rename_bson_db');
  drop_database 

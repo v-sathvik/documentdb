@@ -19,22 +19,13 @@
 #include "metadata/collection.h"
 #include "metadata/metadata_cache.h"
 #include "utils/query_utils.h"
+#include "utils/string_view.h"
 
 #include "api_hooks.h"
 #include "commands/commands_common.h"
 #include "commands/parse_error.h"
+#include "commands/rename_collection.h"
 
-typedef struct RenameCollectionArgs
-{
-	char *databaseName;
-	char *sourceCollectionName;
-	char *targetCollectionName;
-	bool dropTarget;
-} RenameCollectionArgs;
-
-static void ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args);
-static void ExecuteRenameCollection(char *databaseName, char *sourceCollectionName,
-									char *targetCollectionName, bool dropTarget);
 static void DropMongoCollection(char *, char *);
 static void UpdateMongoCollectionName(char *, char *, char *);
 
@@ -46,7 +37,7 @@ PG_FUNCTION_INFO_V1(command_rename_collection_by_bson_spec);
  * Extracts "renameCollection" (source namespace), "to" (target namespace), and "dropTarget".
  * Splits namespaces into database and collection names.
  */
-static void
+void
 ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
 {
 	if (commandSpec == NULL)
@@ -83,7 +74,10 @@ ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
 		}
 		else if (!IsCommonSpecIgnoredField(element.path))
 		{
-			elog(DEBUG1, "Unrecognized command field: renameCollection.%s", element.path);
+			ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_UNKNOWNBSONFIELD),
+							errmsg(
+								"The BSON field 'renameCollection.%s' is not recognized as a valid field",
+								element.path)));
 		}
 	}
 
@@ -94,21 +88,33 @@ ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
 	}
 
 	/* Split "db.collection" into separate parts */
-	char *sourceDot = strchr(sourceNamespace, '.');
-	char *targetDot = strchr(targetNamespace, '.');
+	StringView sourceView = CreateStringViewFromString(sourceNamespace);
+	StringView sourceDbView = StringViewFindPrefix(&sourceView, '.');
+	StringView sourceCollView = StringViewFindSuffix(&sourceView, '.');
 
-	if (sourceDot == NULL || targetDot == NULL)
+	StringView targetView = CreateStringViewFromString(targetNamespace);
+	StringView targetDbView = StringViewFindPrefix(&targetView, '.');
+	StringView targetCollView = StringViewFindSuffix(&targetView, '.');
+
+	if (sourceDbView.length == 0 || sourceCollView.length == 0 ||
+		targetDbView.length == 0 || targetCollView.length == 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
 						errmsg("Invalid namespace format, expected 'database.collection'")));
 	}
 
-	*sourceDot = '\0';
-	*targetDot = '\0';
+	args->databaseName = CreateStringFromStringView(&sourceDbView);
+	args->sourceCollectionName = CreateStringFromStringView(&sourceCollView);
 
-	args->databaseName = sourceNamespace;
-	args->sourceCollectionName = sourceDot + 1;
-	args->targetCollectionName = targetDot + 1;
+	char *targetDatabaseName = CreateStringFromStringView(&targetDbView);
+	args->targetCollectionName = CreateStringFromStringView(&targetCollView);
+
+	/* Validate source and target are in the same database */
+	if (strcmp(args->databaseName, targetDatabaseName) != 0)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_COMMANDNOTSUPPORTED),
+						errmsg("renameCollection cannot change databases")));
+	}
 }
 
 
@@ -116,10 +122,17 @@ ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
  * ExecuteRenameCollection contains the core rename logic shared by both
  * the BSON and legacy entry points.
  */
-static void
+void
 ExecuteRenameCollection(char *databaseName, char *sourceCollectionName,
 						char *targetCollectionName, bool dropTarget)
 {
+	/* Validate source and target collection names are different */
+	if (strcmp(sourceCollectionName, targetCollectionName) == 0)
+	{
+		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_ILLEGALOPERATION),
+						errmsg("Can't rename a collection to itself")));
+	}
+
 	Datum database_datum = CStringGetTextDatum(databaseName);
 	Datum collection_datum = CStringGetTextDatum(sourceCollectionName);
 	Datum new_collection_datum = CStringGetTextDatum(targetCollectionName);
@@ -191,7 +204,10 @@ command_rename_collection_by_bson_spec(PG_FUNCTION_ARGS)
 	ExecuteRenameCollection(args.databaseName, args.sourceCollectionName,
 							args.targetCollectionName, args.dropTarget);
 
-	PG_RETURN_VOID();
+	pgbson_writer resultWriter;
+	PgbsonWriterInit(&resultWriter);
+	PgbsonWriterAppendDouble(&resultWriter, "ok", 2, 1);
+	PG_RETURN_POINTER(PgbsonWriterGetPgbson(&resultWriter));
 }
 
 

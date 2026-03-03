@@ -29,7 +29,7 @@ COMMENT ON FUNCTION documentdb_api_v2.rename_collection(text, text, text, bool)
 /* with BSON */
 CREATE OR REPLACE FUNCTION __API_SCHEMA_V2__.rename_collection(
     p_commandspec __CORE_SCHEMA_V2__.bson)
-RETURNS void
+RETURNS __CORE_SCHEMA_V2__.bson
 LANGUAGE c
 VOLATILE PARALLEL UNSAFE
 AS 'MODULE_PATHNAME', $function$command_rename_collection_by_bson_spec$function$;
@@ -38,7 +38,7 @@ COMMENT ON FUNCTION __API_SCHEMA_V2__.rename_collection(__CORE_SCHEMA_V2__.bson)
 
 CREATE OR REPLACE FUNCTION documentdb_api_v2.rename_collection(
     p_commandspec __CORE_SCHEMA_V2__.bson)
-RETURNS void
+RETURNS __CORE_SCHEMA_V2__.bson
 LANGUAGE c
 VOLATILE PARALLEL UNSAFE
 AS 'MODULE_PATHNAME', $function$command_rename_collection_by_bson_spec$function$;

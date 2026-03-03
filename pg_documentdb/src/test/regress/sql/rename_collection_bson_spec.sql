@@ -44,5 +44,14 @@ SELECT count(*) FROM documentdb_api.collection('rename_bson_db','extra_fields_re
 -- Test 9: invalid namespace format (no dot) → ERROR
 SELECT documentdb_api.rename_collection('{"renameCollection": "noDotHere", "to": "alsoNoDot"}'::documentdb_core.bson);
 
+-- Test 10: cross-database rename → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "otherdb.existing_coll"}'::documentdb_core.bson);
+
+-- Test 11: rename collection to itself → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "rename_bson_db.existing_coll"}'::documentdb_core.bson);
+
+-- Test 12: unknown field → ERROR
+SELECT documentdb_api.rename_collection('{"renameCollection": "rename_bson_db.existing_coll", "to": "rename_bson_db.new_coll", "unknownField": true}'::documentdb_core.bson);
+
 -- Cleanup
 SELECT documentdb_api.drop_database('rename_bson_db');
