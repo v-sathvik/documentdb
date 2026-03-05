@@ -65,6 +65,17 @@ pub async fn validate_rename_collection_with_drop_target(db: &Database) -> Resul
 
     assert_eq!(result.get_f64("ok").unwrap(), 1.0);
 
+    let doc = db
+        .collection::<Document>("coll_b")
+        .find_one(doc! {})
+        .await?
+        .unwrap();
+    assert_eq!(
+        doc.get_str("from").unwrap(),
+        "a",
+        "coll_b should contain coll_a's data after dropTarget"
+    );
+
     Ok(())
 }
 
