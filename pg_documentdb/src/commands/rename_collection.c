@@ -84,7 +84,8 @@ ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
 	if (sourceNamespace == NULL || targetNamespace == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
-						errmsg("renameCollection command must specify both renameCollection and to fields")));
+						errmsg(
+							"renameCollection command must specify both renameCollection and to fields")));
 	}
 
 	/* Split "db.collection" into separate parts */
@@ -100,7 +101,8 @@ ParseRenameCollectionSpec(pgbson *commandSpec, RenameCollectionArgs *args)
 		targetDbView.length == 0 || targetCollView.length == 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_BADVALUE),
-						errmsg("Invalid namespace format, expected 'database.collection'")));
+						errmsg(
+							"Invalid namespace format, expected 'database.collection'")));
 	}
 
 	args->databaseName = CreateStringFromStringView(&sourceDbView);
@@ -170,8 +172,9 @@ ExecuteRenameCollection(char *databaseName, char *sourceCollectionName,
 		else
 		{
 			ereport(ERROR, (errcode(ERRCODE_DOCUMENTDB_NAMESPACEEXISTS),
-							errmsg("The collection %s.%s is already present in the system",
-								   databaseName, targetCollectionName)));
+							errmsg(
+								"The collection %s.%s is already present in the system",
+								databaseName, targetCollectionName)));
 		}
 	}
 
